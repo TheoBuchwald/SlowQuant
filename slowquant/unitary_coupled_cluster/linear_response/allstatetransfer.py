@@ -35,14 +35,16 @@ class LinearResponseUCC(LinearResponseBaseClass):
         self,
         wave_function: WaveFunctionUCC | WaveFunctionUPS,
         excitations: str,
+        tda: bool = False,
     ) -> None:
         """Initialize linear response by calculating the needed matrices.
 
         Args:
             wave_function: Wave function object.
             excitations: Which excitation orders to include in response.
+            tda: Tamm-Dancoff approximation.
         """
-        super().__init__(wave_function, excitations)
+        super().__init__(wave_function, excitations, tda=tda)
         # Overwrite Superclass
         ci_info = get_indexing_extended(
             self.wf.num_inactive_orbs,
@@ -71,16 +73,6 @@ class LinearResponseUCC(LinearResponseBaseClass):
         hf_det = int("1" * self.wf.num_elec + "0" * (self.wf.num_spin_orbs - self.wf.num_elec), 2)
         self.csf_coeffs[ci_info.det2idx[hf_det]] = 1
         self.ci_coeffs = propagate_state(["U"], self.csf_coeffs, *self.index_info_extended)
-        self.q_ops: list[FermionicOperator] = []
-        for i, a in self.wf.kappa_hf_like_idx:
-            op = 2 ** (-1 / 2) * Epq(a, i)
-            self.q_ops.append(op)
-
-        num_parameters = len(self.G_ops) + len(self.q_ops)
-        self.A = np.zeros((num_parameters, num_parameters))
-        self.B = np.zeros((num_parameters, num_parameters))
-        self.Sigma = np.zeros((num_parameters, num_parameters))
-        self.Delta = np.zeros((num_parameters, num_parameters))
 
         H_2i_2a = hamiltonian_2i_2a(
             self.wf.h_mo,

@@ -35,14 +35,16 @@ class LinearResponseUCC(LinearResponseBaseClass):
         self,
         wave_function: WaveFunctionUCC | WaveFunctionUPS,
         excitations: str,
+        tda: bool = False,
     ) -> None:
         """Initialize linear response by calculating the needed matrices.
 
         Args:
             wave_function: Wave function object.
             excitations: Which excitation orders to include in response.
+            tda: Tamm-Dancoff approximation.
         """
-        super().__init__(wave_function, excitations)
+        super().__init__(wave_function, excitations, tda=tda)
         # Overwrite Superclass
         ci_info = get_indexing_extended(
             self.wf.num_inactive_orbs,
@@ -95,7 +97,7 @@ class LinearResponseUCC(LinearResponseBaseClass):
         print("qs", len(self.q_ops))
         grad = np.zeros(2 * len(self.q_ops))
         print("WARNING!")
-        print("Gradient working equations not implemented for state transfer q operators")
+        print("Gradient working equations not implemented for self consistent q operators")
         if len(grad) != 0:
             print("idx, max(abs(grad orb)):", np.argmax(np.abs(grad)), np.max(np.abs(grad)))
             if np.max(np.abs(grad)) > 10**-3:
@@ -148,15 +150,16 @@ class LinearResponseUCC(LinearResponseBaseClass):
                     *self.index_info_extended,
                 )
                 self.A[i, j] = self.A[j, i] = val
-                # Make B
-                # - <CSF| qId qJd Ud H |0>
-                val = -expectation_value(
-                    qI_ket,
-                    [],
-                    qJdUdH_ket,
-                    *self.index_info_extended,
-                )
-                self.B[i, j] = self.B[j, i] = val
+                if not self.tda:
+                    # Make B
+                    # - <CSF| qId qJd Ud H |0>
+                    val = -expectation_value(
+                        qI_ket,
+                        [],
+                        qJdUdH_ket,
+                        *self.index_info_extended,
+                    )
+                    self.B[i, j] = self.B[j, i] = val
                 # Make Sigma
                 if i == j:
                     self.Sigma[i, j] = self.Sigma[j, i] = 1
@@ -178,15 +181,16 @@ class LinearResponseUCC(LinearResponseBaseClass):
                     *self.index_info_extended,
                 )
                 self.A[i + idx_shift, j] = self.A[j, i + idx_shift] = val
-                # Make B
-                # - <CSF| Gd qd Ud H |0>
-                val = -expectation_value(
-                    G_ket,
-                    [],
-                    qdUdH_ket,
-                    *self.index_info_extended,
-                )
-                self.B[i + idx_shift, j] = self.B[j, i + idx_shift] = val
+                if not self.tda:
+                    # Make B
+                    # - <CSF| Gd qd Ud H |0>
+                    val = -expectation_value(
+                        G_ket,
+                        [],
+                        qdUdH_ket,
+                        *self.index_info_extended,
+                    )
+                    self.B[i + idx_shift, j] = self.B[j, i + idx_shift] = val
         for j, GJ in enumerate(self.G_ops):
             UdHUGJ_ket = propagate_state(
                 ["Ud", self.H_0i_0a, "U", GJ], self.csf_coeffs, *self.index_info_extended
@@ -211,15 +215,16 @@ class LinearResponseUCC(LinearResponseBaseClass):
                     *self.index_info_extended,
                 )
                 self.A[i + idx_shift, j + idx_shift] = self.A[j + idx_shift, i + idx_shift] = val
-                # Make B
-                # - <CSF| GId GJd Ud H |0>
-                val = -expectation_value(
-                    GI_ket,
-                    [],
-                    GJdUdH_ket,
-                    *self.index_info_extended,
-                )
-                self.B[i + idx_shift, j + idx_shift] = self.B[j + idx_shift, i + idx_shift] = val
+                if not self.tda:
+                    # Make B
+                    # - <CSF| GId GJd Ud H |0>
+                    val = -expectation_value(
+                        GI_ket,
+                        [],
+                        GJdUdH_ket,
+                        *self.index_info_extended,
+                    )
+                    self.B[i + idx_shift, j + idx_shift] = self.B[j + idx_shift, i + idx_shift] = val
                 # Make Sigma
                 if i == j:
                     self.Sigma[i + idx_shift, j + idx_shift] = 1

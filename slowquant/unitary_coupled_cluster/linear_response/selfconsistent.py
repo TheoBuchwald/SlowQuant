@@ -30,6 +30,7 @@ class LinearResponseUCC(LinearResponseBaseClass):
         wave_function: WaveFunctionUCC | WaveFunctionUPS,
         excitations: str,
         do_approximate_hermitification: bool = False,
+        tda: bool = False,
     ) -> None:
         """Initialize linear response by calculating the needed matrices.
 
@@ -37,11 +38,12 @@ class LinearResponseUCC(LinearResponseBaseClass):
             wave_function: Wave function object.
             excitations: Which excitation orders to include in response.
             do_approximate_hermitification: approximated method with BqG = 0 and AqG made Hermitian
+            tda: Tamm-Dancoff approximation.
         """
-        super().__init__(wave_function, excitations)
+        super().__init__(wave_function, excitations, tda=tda)
 
         num_parameters = len(self.G_ops) + len(self.q_ops)
-        if do_approximate_hermitification:
+        if do_approximate_hermitification and not self.tda:
             self.B_tracked = np.zeros((num_parameters, num_parameters))
 
         rdms = ReducedDenstiyMatrix(
@@ -102,15 +104,16 @@ class LinearResponseUCC(LinearResponseBaseClass):
             self.wf.num_inactive_orbs,
             self.wf.num_active_orbs,
         )
-        self.B[: len(self.q_ops), : len(self.q_ops)] = get_orbital_response_hessian_block(
-            rdms,
-            self.wf.h_mo,
-            self.wf.g_mo,
-            self.wf.kappa_no_activeactive_idx_dagger,
-            self.wf.kappa_no_activeactive_idx_dagger,
-            self.wf.num_inactive_orbs,
-            self.wf.num_active_orbs,
-        )
+        if not self.tda:
+            self.B[: len(self.q_ops), : len(self.q_ops)] = get_orbital_response_hessian_block(
+                rdms,
+                self.wf.h_mo,
+                self.wf.g_mo,
+                self.wf.kappa_no_activeactive_idx_dagger,
+                self.wf.kappa_no_activeactive_idx_dagger,
+                self.wf.num_inactive_orbs,
+                self.wf.num_active_orbs,
+            )
         self.Sigma[: len(self.q_ops), : len(self.q_ops)] = get_orbital_response_metric_sigma(
             rdms, self.wf.kappa_no_activeactive_idx
         )
@@ -140,9 +143,10 @@ class LinearResponseUCC(LinearResponseBaseClass):
                         *self.index_info,
                     )
                     self.A[j, i + idx_shift] = self.A[i + idx_shift, j] = val + tmp
-                    # Make B
-                    # - <CSF| Gd Ud qd H |0>
-                    self.B_tracked[j, i + idx_shift] = self.B_tracked[i + idx_shift, j] = -tmp
+                    if not self.tda:
+                        # Make B
+                        # - <CSF| Gd Ud qd H |0>
+                        self.B_tracked[j, i + idx_shift] = self.B_tracked[i + idx_shift, j] = -tmp
                 else:
                     # Make A
                     # <CSF| Gd Ud H q |0>
@@ -153,15 +157,16 @@ class LinearResponseUCC(LinearResponseBaseClass):
                         *self.index_info,
                     )
                     self.A[i + idx_shift, j] = self.A[j, i + idx_shift] = val
-                    # Make B
-                    # - <CSF| Gd Ud qd H |0>
-                    val = -expectation_value(
-                        G_ket,
-                        [],
-                        UdqdH_ket,
-                        *self.index_info,
-                    )
-                    self.B[i + idx_shift, j] = self.B[j, i + idx_shift] = val
+                    if not self.tda:
+                        # Make B
+                        # - <CSF| Gd Ud qd H |0>
+                        val = -expectation_value(
+                            G_ket,
+                            [],
+                            UdqdH_ket,
+                            *self.index_info,
+                        )
+                        self.B[i + idx_shift, j] = self.B[j, i + idx_shift] = val
         for j, GJ in enumerate(self.G_ops):
             UdHUGJ_ket = propagate_state(
                 ["Ud", self.H_0i_0a, "U", GJ],
@@ -200,15 +205,16 @@ class LinearResponseUCC(LinearResponseBaseClass):
                     *self.index_info,
                 )
                 self.A[i + idx_shift, j + idx_shift] = self.A[j + idx_shift, i + idx_shift] = val
-                # Make B
-                # - <CSF| GId GJd Ud H |0>
-                val = -expectation_value(
-                    GI_ket,
-                    [],
-                    GJdUdH_ket,
-                    *self.index_info,
-                )
-                self.B[i + idx_shift, j + idx_shift] = self.B[j + idx_shift, i + idx_shift] = val
+                if not self.tda:
+                    # Make B
+                    # - <CSF| GId GJd Ud H |0>
+                    val = -expectation_value(
+                        GI_ket,
+                        [],
+                        GJdUdH_ket,
+                        *self.index_info,
+                    )
+                    self.B[i + idx_shift, j + idx_shift] = self.B[j + idx_shift, i + idx_shift] = val
                 # Make Sigma
                 if i == j:
                     self.Sigma[i + idx_shift, j + idx_shift] = 1
@@ -267,6 +273,7 @@ class LinearResponseUCC(LinearResponseBaseClass):
                 self.normed_response_vectors,
                 state_number,
                 number_excitations,
+                tda = self.tda,
             )
             q_part_y = get_orbital_response_property_gradient(
                 rdms,
@@ -277,6 +284,7 @@ class LinearResponseUCC(LinearResponseBaseClass):
                 self.normed_response_vectors,
                 state_number,
                 number_excitations,
+                tda = self.tda,
             )
             q_part_z = get_orbital_response_property_gradient(
                 rdms,
@@ -287,6 +295,7 @@ class LinearResponseUCC(LinearResponseBaseClass):
                 self.normed_response_vectors,
                 state_number,
                 number_excitations,
+                tda = self.tda,
             )
             g_part_x = 0.0
             g_part_y = 0.0
@@ -304,25 +313,11 @@ class LinearResponseUCC(LinearResponseBaseClass):
                     G_ket,
                     *self.index_info,
                 )
-                # Y * <0| Gd Ud mux | CSF>
-                g_part_x += self.Y_G_normed[i, state_number] * expectation_value(
-                    G_ket,
-                    [],
-                    Udmux_ket,
-                    *self.index_info,
-                )
                 # -Z * <0| muy U G | CSF>
                 g_part_y -= self.Z_G_normed[i, state_number] * expectation_value(
                     Udmuyd_ket,
                     [],
                     G_ket,
-                    *self.index_info,
-                )
-                # Y * <0| Gd Ud muy | CSF>
-                g_part_y += self.Y_G_normed[i, state_number] * expectation_value(
-                    G_ket,
-                    [],
-                    Udmuy_ket,
                     *self.index_info,
                 )
                 # -Z * <0| muz U G | CSF>
@@ -332,13 +327,28 @@ class LinearResponseUCC(LinearResponseBaseClass):
                     G_ket,
                     *self.index_info,
                 )
-                # Y * <0| Gd Ud muz | CSF>
-                g_part_z += self.Y_G_normed[i, state_number] * expectation_value(
-                    G_ket,
-                    [],
-                    Udmuz_ket,
-                    *self.index_info,
-                )
+                if not self.tda:
+                    # Y * <0| Gd Ud mux | CSF>
+                    g_part_x += self.Y_G_normed[i, state_number] * expectation_value(
+                        G_ket,
+                        [],
+                        Udmux_ket,
+                        *self.index_info,
+                    )
+                    # Y * <0| Gd Ud muy | CSF>
+                    g_part_y += self.Y_G_normed[i, state_number] * expectation_value(
+                        G_ket,
+                        [],
+                        Udmuy_ket,
+                        *self.index_info,
+                    )
+                    # Y * <0| Gd Ud muz | CSF>
+                    g_part_z += self.Y_G_normed[i, state_number] * expectation_value(
+                        G_ket,
+                        [],
+                        Udmuz_ket,
+                        *self.index_info,
+                    )
             transition_dipoles[state_number, 0] = q_part_x + g_part_x
             transition_dipoles[state_number, 1] = q_part_y + g_part_y
             transition_dipoles[state_number, 2] = q_part_z + g_part_z
